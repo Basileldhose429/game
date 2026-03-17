@@ -243,7 +243,6 @@
       transform: translate(-50%, -50%);
       width: 24px;
       height: 24px;
-      transition: transform .1s;
     }
 
     #xhair-lines::before {
@@ -1578,7 +1577,7 @@
       // Muzzle flash on xhair
       var xl = document.getElementById('xhair-lines');
       xl.style.transform = 'translate(-50%,-50%) scale(1.6)';
-      setTimeout(function () { xl.style.transform = 'translate(-50%,-50%) scale(1)'; }, 80);
+      setTimeout(function () { xl.style.transform = 'translate(-50%,-50%) scale(1)'; }, 50);
 
       // Make civs panic if you shoot
       for (var i = 0; i < peds.length; i++) {
@@ -1754,7 +1753,7 @@
       document.getElementById('weapon-icon').textContent = w.emoji;
       document.getElementById('ammo-display').textContent = lw.ammo + "-" + w.maxAmmo;
 
-      if (state.aimMode) {
+      if (state.aimMode || shootHeld) {
         document.getElementById('xhair').style.display = 'block';
       } else {
         document.getElementById('xhair').style.display = 'none';
