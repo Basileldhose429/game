@@ -3815,6 +3815,11 @@ int main() {
       body.castShadow = true; g.add(body);
       var tail = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.4, 0.4), new THREE.MeshLambertMaterial({color:0x1e3a8a}));
       tail.position.set(-2, 0.2, 0); g.add(tail);
+      var rotor = new THREE.Mesh(new THREE.BoxGeometry(5, 0.05, 0.4), new THREE.MeshLambertMaterial({color:0x333333}));
+      rotor.position.y = 0.8; g.add(rotor);
+      g.userData.rotor = rotor;
+      var skids = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.1, 1.8), new THREE.MeshLambertMaterial({color:0x222222}));
+      skids.position.y = -0.7; g.add(skids);
       return g;
     }
 
@@ -3825,14 +3830,6 @@ int main() {
       g.position.copy(playerModel.position).add(new THREE.Vector3(0, 30, 0));
       scene.add(g);
       activeHeli = { mesh: g, hp: 500 };
-    }
-      tail.position.set(-2, 0.2, 0); g.add(tail);
-      var rotor = new THREE.Mesh(new THREE.BoxGeometry(5, 0.05, 0.4), new THREE.MeshLambertMaterial({color:0x333333}));
-      rotor.position.y = 0.8; g.add(rotor);
-      g.userData.rotor = rotor;
-      var skids = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.1, 1.8), new THREE.MeshLambertMaterial({color:0x222222}));
-      skids.position.y = -0.7; g.add(skids);
-      return g;
     }
 
     // ─── MISSION SYSTEM ───
@@ -3943,6 +3940,38 @@ int main() {
       }
     }
 
+    // ─── EQS-STYLE TACTICAL AI (Production Logic) ───
+    function getTacticalPoint(cop, type) {
+        var playerPos = playerModel.position.clone();
+        var bestPoint = null;
+        var bestScore = -Infinity;
+
+        // Generate candidates in a ring
+        for (var i = 0; i < 8; i++) {
+            var ang = (i / 8) * Math.PI * 2;
+            var dist = 15 + Math.random() * 10;
+            var candidate = playerPos.clone().add(new THREE.Vector3(Math.cos(ang) * dist, 0, Math.sin(ang) * dist));
+            
+            var score = 0;
+            if (type === 'FLANK') {
+                // Prefer side angles (Dot product check)
+                var toCop = new THREE.Vector3().subVectors(candidate, playerPos).normalize();
+                var pFwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+                var dot = Math.abs(toCop.dot(pFwd));
+                score = (dot < 0.5) ? 100 : 0; // High score for side angles
+            } else if (type === 'COVER') {
+                // Prefer blocked positions
+                if (isPositionBlockedXZ(candidate.x, candidate.z, 0.5)) score = 100;
+            }
+            
+            if (score > bestScore) {
+                bestScore = score;
+                bestPoint = candidate;
+            }
+        }
+        return bestPoint || playerPos;
+    }
+
     // ─── Inventory Management (Production Pattern) ───
     function inventoryAdd(id, count) {
         state.inventory = state.inventory || [];
@@ -3957,7 +3986,24 @@ int main() {
         if (item) item.count = Math.max(0, item.count - count);
         updateHUD();
     }
+
+    // ─── Matchmaking & Lobby Flow (Production Scaffolding) ───
+    function startMatchmaking() {
+        addKillFeed("🔍 FINDING BEST SERVER...", true);
+        setTimeout(function() {
+            var servers = [
+                { ip: "127.0.0.1", port: 8081, players: 5, ping: 15 },
+                { ip: "127.0.0.1", port: 8082, players: 2, ping: 45 }
+            ];
+            // Sort by lowest players for load balancing
+            var best = servers.sort((a,b) => a.players - b.players)[0];
+            addKillFeed("✅ JOINING SERVER: " + best.ip + ":" + best.port, true);
+            // Simulate Travel
+            setTimeout(() => { document.getElementById('start-screen').style.display='none'; state.running=true; }, 1000);
+        }, 2000);
+    }
       if (!playerModel) return false;
+
       var px = playerModel.position.x;
       var pz = playerModel.position.z;
       for (var i = 0; i < safeZones.length; i++) {
@@ -3996,19 +4042,17 @@ int main() {
             
             var pVel = (activeVehicle ? activeVehicle.vel.clone() : new THREE.Vector3());
             
-            // ─── Behavior Tree Logic ───
-            var canSee = dist < 60; // Simple LOS check
+            // ─── Behavior Tree Logic (EQS Integrated) ───
+            var canSee = dist < 60;
             if (canSee) p.lastKnownLoc = playerModel.position.clone();
             
-            var targetLoc = p.lastKnownLoc || playerModel.position.clone();
-            if (canSee) {
-                // Predictive lead
-                targetLoc.add(pVel.multiplyScalar(0.7));
-                // Tactical Offsets
-                if (p.role === 'FLANKER_L') targetLoc.add(new THREE.Vector3(-Math.cos(yaw) * 15, 0, Math.sin(yaw) * 15));
-                if (p.role === 'FLANKER_R') targetLoc.add(new THREE.Vector3(Math.cos(yaw) * 15, 0, -Math.sin(yaw) * 15));
+            p.tacticalTimer = (p.tacticalTimer || 0) + dt;
+            if (p.tacticalTimer > 2.0) {
+                p.tacticalTimer = 0;
+                p.targetPoint = getTacticalPoint(p, p.role === 'CHASER' ? 'FLANK' : 'COVER');
             }
 
+            var targetLoc = p.targetPoint || p.lastKnownLoc || playerModel.position.clone();
             var dir = new THREE.Vector3().subVectors(targetLoc, p.mesh.position);
             dir.y = 0; dir.normalize();
             
