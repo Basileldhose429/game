@@ -3939,16 +3939,26 @@ int main() {
             p.role = p.role || (i % 3 === 0 ? 'CHASER' : (i % 3 === 1 ? 'FLANKER_L' : 'FLANKER_R'));
             
             var pVel = (activeVehicle ? activeVehicle.vel.clone() : new THREE.Vector3());
-            var lead = playerModel.position.clone().add(pVel.multiplyScalar(0.7));
             
-            // Tactical Offsets
-            if (p.role === 'FLANKER_L') lead.add(new THREE.Vector3(-Math.cos(yaw) * 15, 0, Math.sin(yaw) * 15));
-            if (p.role === 'FLANKER_R') lead.add(new THREE.Vector3(Math.cos(yaw) * 15, 0, -Math.sin(yaw) * 15));
+            // ─── Behavior Tree Logic ───
+            var canSee = dist < 60; // Simple LOS check
+            if (canSee) p.lastKnownLoc = playerModel.position.clone();
+            
+            var targetLoc = p.lastKnownLoc || playerModel.position.clone();
+            if (canSee) {
+                // Predictive lead
+                targetLoc.add(pVel.multiplyScalar(0.7));
+                // Tactical Offsets
+                if (p.role === 'FLANKER_L') targetLoc.add(new THREE.Vector3(-Math.cos(yaw) * 15, 0, Math.sin(yaw) * 15));
+                if (p.role === 'FLANKER_R') targetLoc.add(new THREE.Vector3(Math.cos(yaw) * 15, 0, -Math.sin(yaw) * 15));
+            }
 
-            var dir = new THREE.Vector3().subVectors(lead, p.mesh.position);
+            var dir = new THREE.Vector3().subVectors(targetLoc, p.mesh.position);
             dir.y = 0; dir.normalize();
             
             var speed = archetype.spd * (archetype.id === 'swat' ? 6.5 : 5.8) * dt;
+            if (!canSee) speed *= 0.7; // Slower when searching
+
             moveEntityWithBlockers(p.mesh, dir.clone().multiplyScalar(speed), 0.7);
             
             var tgtAngle = Math.atan2(dir.x, dir.z);
@@ -4931,7 +4941,13 @@ int main() {
         if (v.vel.length() > 1.0) {
            var turnSpeed = v.turnSpd * (isDrifting ? 1.5 : 1.0);
            var speedRatio = Math.min(1.0, v.vel.length() / 15);
-           v.mesh.rotation.y += steer * turnSpeed * dt * speedRatio;
+           // Production Steering Smoothing
+           v.smoothedSteer = THREE.MathUtils.lerp(v.smoothedSteer || 0, steer, dt * 5);
+           v.mesh.rotation.y += v.smoothedSteer * turnSpeed * dt * speedRatio;
+           
+           // Production Downforce
+           var downforce = v.vel.length() * 0.08;
+           v.vel.y -= downforce * dt; 
         }
         
         var moveDelta = v.vel.clone().multiplyScalar(dt);
