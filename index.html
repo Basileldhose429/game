@@ -3780,25 +3780,31 @@ int main() {
     }
 
     function updateSpikes(dt) {
-      if (!activeVehicle) return;
-      for (var i=spikes.length-1; i>=0; i--) {
-        var s = spikes[i];
-        if (s.mesh.position.distanceTo(activeVehicle.mesh.position) < 3) {
-          // Tire blown!
-          if (!activeVehicle.tiresBlown) {
-            activeVehicle.tiresBlown = true;
-            activeVehicle.maxSpeed *= 0.3;
-            activeVehicle.turnSpd *= 0.5;
-            playSound('hit');
-            addKillFeed("💥 TIRES BLOWN BY SPIKES!", true);
+      // Check player vehicle
+      if (activeVehicle) {
+        for (var i=spikes.length-1; i>=0; i--) {
+          var s = spikes[i];
+          if (s.mesh.position.distanceTo(activeVehicle.mesh.position) < 3.5) {
+            if (!activeVehicle.tiresBlown) {
+              activeVehicle.tiresBlown = true;
+              activeVehicle.maxSpeed *= 0.3;
+              activeVehicle.turnSpd *= 0.5;
+              playSound('hit');
+              addKillFeed("💥 TIRES BLOWN BY SPIKES!", true);
+            }
+            scene.remove(s.mesh); spikes.splice(i, 1);
           }
-          // Remove spikes after hit or after some time
-          scene.remove(s.mesh);
-          spikes.splice(i, 1);
-        } else if (s.mesh.position.distanceTo(playerModel.position) > 150) {
-          // Cleanup far spikes
-          scene.remove(s.mesh);
-          spikes.splice(i, 1);
+        }
+      }
+      // Check NPC vehicles (Production feature)
+      for (var i = 0; i < vehicles.length; i++) {
+        var v = vehicles[i];
+        if (v === activeVehicle || v.destroyed) continue;
+        for (var j = spikes.length - 1; j >= 0; j--) {
+          if (v.mesh.position.distanceTo(spikes[j].mesh.position) < 3.0) {
+            v.maxSpeed *= 0.4; // Slow down NPC on spike hit
+            scene.remove(spikes[j].mesh); spikes.splice(j, 1);
+          }
         }
       }
     }
@@ -3929,10 +3935,16 @@ int main() {
         if (isCop && state.wantedStars > 0 && !state.isHidden && !state.dead && !playerSafe) {
           p.policeState = p.policeState || PSTATE.CHASE;
           
-          if (p.policeState === PSTATE.CHASE) {
-            // Predictive lead: target where player will be
+            // ─── Tactical Role Assignment (Production Logic) ───
+            p.role = p.role || (i % 3 === 0 ? 'CHASER' : (i % 3 === 1 ? 'FLANKER_L' : 'FLANKER_R'));
+            
             var pVel = (activeVehicle ? activeVehicle.vel.clone() : new THREE.Vector3());
             var lead = playerModel.position.clone().add(pVel.multiplyScalar(0.7));
+            
+            // Tactical Offsets
+            if (p.role === 'FLANKER_L') lead.add(new THREE.Vector3(-Math.cos(yaw) * 15, 0, Math.sin(yaw) * 15));
+            if (p.role === 'FLANKER_R') lead.add(new THREE.Vector3(Math.cos(yaw) * 15, 0, -Math.sin(yaw) * 15));
+
             var dir = new THREE.Vector3().subVectors(lead, p.mesh.position);
             dir.y = 0; dir.normalize();
             
@@ -4284,17 +4296,33 @@ int main() {
         bullets.push({ mesh: bm, dir: bDir, spd: w.bulSpd, dmg: w.damage, life: 0, col: w.color, weapon: state.weaponIdx });
       }
 
-      // Muzzle flash on xhair
-      var xl = document.getElementById('xhair-lines');
-      xl.style.transform = 'translate(-50%,-50%) scale(1.6)';
-      setTimeout(function () { xl.style.transform = 'translate(-50%,-50%) scale(1)'; }, 50);
+      // ─── Production Combat System (Instant Hit Detection) ───
+      var raycaster = new THREE.Raycaster();
+      raycaster.set(spawnPos, bDir);
+      
+      var targets = [];
+      peds.forEach(p => targets.push(p.mesh));
+      vehicles.forEach(v => { if (v !== activeVehicle) targets.push(v.mesh); });
 
-      // Make civs panic if you shoot
-      for (var i = 0; i < peds.length; i++) {
-        if (!getPedArchetype(peds[i]).isCop && peds[i].mesh.position.distanceTo(playerModel.position) < 40) {
-          peds[i].panicking = true;
-          if (peds[i].idleOut) { peds[i].idleOut.stop(); peds[i].runOut.play(); }
-        }
+      var intersects = raycaster.intersectObjects(targets, true);
+      if (intersects.length > 0) {
+          var hitObj = intersects[0].object;
+          var hitPoint = intersects[0].point;
+          
+          // Find which ped or vehicle was hit
+          var hitTarget = null;
+          peds.forEach(p => { if (p.mesh === hitObj || p.mesh.getObjectById(hitObj.id)) hitTarget = p; });
+          
+          if (hitTarget) {
+              hitTarget.hp -= w.damage * state.dmgMult;
+              burst(hitPoint, 0xef4444, 10);
+              playSound('hit');
+              if (hitTarget.hp <= 0) {
+                  // Handled in processPeds or immediate cleanup
+              }
+          } else {
+              burst(hitPoint, 0xe5e7eb, 5); // Hit environment/vehicle
+          }
       }
 
       if (lw.ammo <= 0) startReload();
