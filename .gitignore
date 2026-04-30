@@ -1,0 +1,7 @@
+node_modules/
+.gemini/
+.claude/
+server.log
+server.err
+game.db
+.mcp.json
